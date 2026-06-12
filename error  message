@@ -1,0 +1,21 @@
+Reading data from: calibration_template_v2.xlsx...
+Found 4 valid row(s) to process.
+Connecting to Supabase...
+  ✕ Failed Syncing Serial: 17139 → relation "active_calibrations" does not exist
+LINE 2:         INSERT INTO active_calibrations (
+                            ^
+
+  ✕ Failed Syncing Serial: 17139 → relation "active_calibrations" does not exist
+LINE 2:         INSERT INTO active_calibrations (
+                            ^
+
+  ✕ Failed Syncing Serial: 17139 → relation "active_calibrations" does not exist
+LINE 2:         INSERT INTO active_calibrations (
+                            ^
+
+  ✕ Failed Syncing Serial: 17139 → relation "active_calibrations" does not exist
+LINE 2:         INSERT INTO active_calibrations (
+                            ^
+
+
+Done! Successfully synchronized 0/4 rows to your Supabase Database.
