@@ -1,21 +1,48 @@
-Reading data from: calibration_template_v2.xlsx...
-Found 4 valid row(s) to process.
-Connecting to Supabase...
-  ✕ Failed Syncing Serial: 17139 → relation "active_calibrations" does not exist
-LINE 2:         INSERT INTO active_calibrations (
-                            ^
-
-  ✕ Failed Syncing Serial: 17139 → relation "active_calibrations" does not exist
-LINE 2:         INSERT INTO active_calibrations (
-                            ^
-
-  ✕ Failed Syncing Serial: 17139 → relation "active_calibrations" does not exist
-LINE 2:         INSERT INTO active_calibrations (
-                            ^
-
-  ✕ Failed Syncing Serial: 17139 → relation "active_calibrations" does not exist
-LINE 2:         INSERT INTO active_calibrations (
-                            ^
-
-
-Done! Successfully synchronized 0/4 rows to your Supabase Database.
+def upsert_active_calibration(cur, row):
+    """
+    Inserts a row, or updates it if the serial number already exists.
+    This guarantees ONLY the single most recent record exists per gage.
+    """
+    cur.execute("""
+        INSERT INTO public.active_calibrations (
+            serial_number, gage_type, manufacturer, model_number, graduation,
+            procedure_name, procedure_number, sn_gage_used_to_cal, 
+            date_calibrated, calibrated_by, checkpoint_a_value, 
+            checkpoint_b_value, checkpoint_c_value, status, notes, updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        ON CONFLICT (serial_number) DO UPDATE SET
+            gage_type           = EXCLUDED.gage_type,
+            manufacturer        = EXCLUDED.manufacturer,
+            model_number        = EXCLUDED.model_number,
+            graduation          = EXCLUDED.graduation,
+            procedure_name      = EXCLUDED.procedure_name,
+            procedure_number    = EXCLUDED.procedure_number,
+            sn_gage_used_to_cal = EXCLUDED.sn_gage_used_to_cal,
+            date_calibrated     = EXCLUDED.date_calibrated,
+            calibrated_by       = EXCLUDED.calibrated_by,
+            checkpoint_a_value  = EXCLUDED.checkpoint_a_value,
+            checkpoint_b_value  = EXCLUDED.checkpoint_b_value,
+            checkpoint_c_value  = EXCLUDED.checkpoint_c_value,
+            status              = EXCLUDED.status,
+            notes               = EXCLUDED.notes,
+            updated_at          = NOW()
+        RETURNING serial_number;
+    """, (
+        str_val(row[COL["serial_number"]]),
+        str_val(row[COL["gage_type"]]),
+        str_val(row[COL["manufacturer"]]),
+        str_val(row[COL["model_number"]]),
+        str_val(row[COL["graduation"]]),
+        str_val(row[COL["procedure"]]),
+        str_val(row[COL["procedure_number"]]),
+        str_val(row[COL["sn_gage_used_to_cal"]]),
+        parse_date(row[COL["date_calibrated"]]),
+        str_val(row[COL["calibrated_by"]]),
+        str_val(row[COL["checkpoint_a_value"]]),
+        str_val(row[COL["checkpoint_b_value"]]),
+        str_val(row[COL["checkpoint_c_value"]]),
+        str_val(row[COL["status"]]) or "READY",
+        str_val(row[COL["notes"]]),
+    ))
+    return cur.fetchone()[0]
