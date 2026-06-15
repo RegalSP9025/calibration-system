@@ -1,0 +1,77 @@
+import os
+from pathlib import Path
+from datetime import datetime
+from openpyxl import load_workbook
+from dotenv import load_dotenv
+from supabase import create_client
+
+load_dotenv()
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError(
+        "Missing SUPABASE_URL or SUPABASE_KEY. "
+        "Set them in the environment or in a .env file."
+    )
+
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+TABLE_NAME = "RegalPatelTest"
+EXCEL_FILE = Path("calibration_template_v2.xlsx")
+SHEET_NAME = "MAIN_INPUT"  # change if needed
+
+def normalize_value(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        trimmed = value.strip()
+        return trimmed if trimmed != "" else None
+    return value
+
+def read_excel(path: Path):
+    wb = load_workbook(path, data_only=True)
+    ws = wb[SHEET_NAME] if SHEET_NAME in wb.sheetnames else wb.active
+
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return []
+
+    headers = [str(cell).strip() if cell is not None else None for cell in rows[0]]
+    records = []
+
+    for row in rows[1:]:
+        if row is None or all(cell is None or (isinstance(cell, str) and cell.strip() == "") for cell in row):
+            continue
+
+        record = {}
+        for header, cell in zip(headers, row):
+            if not header:
+                continue
+            record[header] = normalize_value(cell)
+        if record:
+            records.append(record)
+
+    return records
+
+def insert_records(records):
+    if not records:
+        print("No records to insert.")
+        return
+
+    response = supabase.table(TABLE_NAME).insert(records).execute()
+    if response.error:
+        raise RuntimeError(f"Supabase insert failed: {response.error.message}")
+    print(f"Inserted {len(records)} records into {TABLE_NAME}.")
+    return response.data
+
+def main():
+    if not EXCEL_FILE.exists():
+        raise FileNotFoundError(f"{EXCEL_FILE} not found.")
+
+    records = read_excel(EXCEL_FILE)
+    print(f"Found {len(records)} records to insert.")
+    insert_records(records)
+
+if __name__ == "__main__":
+    main()
