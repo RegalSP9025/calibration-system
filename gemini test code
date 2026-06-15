@@ -1,0 +1,18 @@
+# Loop through the rows parsed from Excel
+for row_data in formatted_rows:
+    
+    # 1. This is the exact dictionary payload your script prepares
+    payload = {
+        "serial_number": row_data['serial_number'],
+        "gage_type": row_data['gage_type'],
+        "date_calibrated": str(row_data['date_calibrated']), # Format to string for JSON
+        "status": row_data['status']
+        # ... include your other columns here matching RegalPatelTest
+    }
+    
+    # 2. TEMPORARILY COMMENT OUT THE SUPABASE CALL:
+    # supabase.table("RegalPatelTest").insert(payload).execute()
+    
+    # 3. REPLACE WITH A LOCAL TERMINAL TEST PRINT:
+    print(f"--- [LOCAL TEST] Ready to Sync Serial: {payload['serial_number']} ---")
+    print(f"    Payload Data: {payload}\n")
