@@ -1,18 +1,180 @@
-# Loop through the rows parsed from Excel
-for row_data in formatted_rows:
+import os
+import glob
+from datetime import datetime
+
+# Clean imports with clear troubleshooting messages
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+except ImportError:
+    raise ImportError("psycopg2 is required. Run 'python -m pip install psycopg2-binary'")
+
+try:
+    import openpyxl
+except ImportError:
+    raise ImportError("openpyxl is required. Run 'python -m pip install openpyxl'")
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(): return None
+
+# Load local environment variables from Step 3
+load_dotenv()
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir))
+TEMPLATES_DIR = os.path.join(ROOT_DIR, "templates")
+
+def get_template_filepath():
+    """Finds your calibration template inside the templates directory."""
+    exact = os.path.join(TEMPLATES_DIR, "calibration_template_v2.xlsx")
+    if os.path.exists(exact):
+        return exact
+    candidates = sorted(glob.glob(os.path.join(TEMPLATES_DIR, "calibration_template*.xlsx")))
+    if candidates:
+        return candidates[0]
+    raise FileNotFoundError(f"Could not locate an Excel template workbook in {TEMPLATES_DIR}")
+
+# 0-indexed column layout mapping exactly to your Excel sheets horizontal structure
+COL = {
+    "gage_type":           0,
+    "sn_gage_used_to_cal": 1,
+    "graduation":          2,
+    "procedure_name":      3,
+    "procedure_number":    4,
+    "date_calibrated":     5,
+    "serial_number":       6,
+    "manufacturer":        7,
+    "model_number":        8,
+    "calibrated_by":       9,
+    "checkpoint_a_value": 10,
+    "checkpoint_b_value": 14,
+    "checkpoint_c_value": 18,
+    "status":             22,
+    "notes":              23,
+}
+
+def get_db_connection():
+    """Establishes a pipe to your local Postgres CalTest instance."""
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST", "localhost"),
+        port=os.getenv("DB_PORT", 5432),
+        dbname=os.getenv("DB_NAME", "CalTest"),
+        user=os.getenv("DB_USER", "postgres"),
+        password=os.getenv("DB_PASSWORD")
+    )
+
+def parse_date(val):
+    """Safely normalizes Excel date formatting into PostgreSQL date blocks."""
+    if val is None:
+        return None
+    if hasattr(val, "date"):
+        return val.date()
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m-%d-%Y", "%m/%d/%y"):
+        try:
+            return datetime.strptime(str(val).strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
+
+def str_val(val):
+    return str(val).strip() if val is not None else None
+
+def read_excel_data(filepath):
+    """Parses row lines dynamically starting right under the row header."""
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+    ws = wb["MAIN_INPUT"]
+    extracted_rows = []
     
-    # 1. This is the exact dictionary payload your script prepares
-    payload = {
-        "serial_number": row_data['serial_number'],
-        "gage_type": row_data['gage_type'],
-        "date_calibrated": str(row_data['date_calibrated']), # Format to string for JSON
-        "status": row_data['status']
-        # ... include your other columns here matching RegalPatelTest
-    }
-    
-    # 2. TEMPORARILY COMMENT OUT THE SUPABASE CALL:
-    # supabase.table("RegalPatelTest").insert(payload).execute()
-    
-    # 3. REPLACE WITH A LOCAL TERMINAL TEST PRINT:
-    print(f"--- [LOCAL TEST] Ready to Sync Serial: {payload['serial_number']} ---")
-    print(f"    Payload Data: {payload}\n")
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        # Prevent tracking or blowing up on trailing empty sheet lines
+        if not row or len(row) <= COL["serial_number"] or not row[COL["serial_number"]]:
+            continue
+        extracted_rows.append(row)
+    return extracted_rows
+
+def upsert_to_local_postgres(cur, row):
+    """Inserts a gauge record or overwrites it on a matching serial number conflict."""
+    cur.execute("""
+        INSERT INTO public."RegalPatelTest" (
+            serial_number, gage_type, manufacturer, model_number, graduation,
+            procedure_name, procedure_number, sn_gage_used_to_cal, 
+            date_calibrated, calibrated_by, checkpoint_a_value, 
+            checkpoint_b_value, checkpoint_c_value, status, notes, updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        ON CONFLICT (serial_number) DO UPDATE SET
+            gage_type           = EXCLUDED.gage_type,
+            manufacturer        = EXCLUDED.manufacturer,
+            model_number        = EXCLUDED.model_number,
+            graduation          = EXCLUDED.graduation,
+            procedure_name      = EXCLUDED.procedure_name,
+            procedure_number    = EXCLUDED.procedure_number,
+            sn_gage_used_to_cal = EXCLUDED.sn_gage_used_to_cal,
+            date_calibrated     = EXCLUDED.date_calibrated,
+            calibrated_by       = EXCLUDED.calibrated_by,
+            checkpoint_a_value  = EXCLUDED.checkpoint_a_value,
+            checkpoint_b_value  = EXCLUDED.checkpoint_b_value,
+            checkpoint_c_value  = EXCLUDED.checkpoint_c_value,
+            status              = EXCLUDED.status,
+            notes               = EXCLUDED.notes,
+            updated_at          = NOW()
+        RETURNING serial_number;
+    """, (
+        str_val(row[COL["serial_number"]]),
+        str_val(row[COL["gage_type"]]),
+        str_val(row[COL["manufacturer"]]),
+        str_val(row[COL["model_number"]]),
+        str_val(row[COL["graduation"]]),
+        str_val(row[COL["procedure_name"]]),
+        str_val(row[COL["procedure_number"]]),
+        str_val(row[COL["sn_gage_used_to_cal"]]),
+        parse_date(row[COL["date_calibrated"]]),
+        str_val(row[COL["calibrated_by"]]),
+        str_val(row[COL["checkpoint_a_value"]]),
+        str_val(row[COL["checkpoint_b_value"]]),
+        str_val(row[COL["checkpoint_c_value"]]),
+        str_val(row[COL["status"]]) or "READY",
+        str_val(row[COL["notes"]]),
+    ))
+    return cur.fetchone()[0]
+
+def main():
+    print("--- 🚀 Starting Local Calibration Pipeline Sync ---")
+    try:
+        filepath = get_template_filepath()
+    except FileNotFoundError as e:
+        print(f"[ERROR] {e}")
+        return
+
+    print(f"Reading target sheet: {os.path.basename(filepath)}")
+    rows = read_excel_data(filepath)
+    print(f"Parsed {len(rows)} data rows from Excel.")
+
+    print("Connecting to local PostgreSQL instance ('CalTest')...")
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+    except Exception as conn_error:
+        print(f"[FATAL CONNECTION ERROR]: Could not link to Postgres port. Verify your password in .env.\nDetail: {conn_error}")
+        return
+
+    success_count = 0
+    for row in rows:
+        serial = str_val(row[COL["serial_number"]])
+        try:
+            synchronized_serial = upsert_to_local_postgres(cur, row)
+            conn.commit()
+            print(f"  ✓ Synchronized Serial: {synchronized_serial}")
+            success_count += 1
+        except Exception as row_error:
+            conn.rollback()
+            print(f"  ✕ Sync Failed for Serial {serial} ➔ {row_error}")
+
+    cur.close()
+    conn.close()
+    print(f"\n--- 🎉 Pipeline Complete: Successfully updated {success_count}/{len(rows)} metrics in your local database! ---")
+
+if __name__ == "__main__":
+    main()
