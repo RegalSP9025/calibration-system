@@ -1,26 +1,9 @@
-def insert_measurements(cur, serial_num, row):
-    """
-    Clears out old run measurements for this serial number and inserts the new ones.
-    """
-    # First, delete old measurements for this specific tool to keep runs fresh
-    cur.execute("DELETE FROM public.latest_calibration_measurements WHERE gage_serial = %s", (serial_num,))
-    
-    mapping = [
-        ("A", 1, row[COL["A1"]]),
-        ("A", 2, row[COL["A2"]]),
-        ("A", 3, row[COL["A3"]]),
-        ("B", 1, row[COL["B1"]]),
-        ("B", 2, row[COL["B2"]]),
-        ("B", 3, row[COL["B3"]]),
-        ("C", 1, row[COL["C1"]]),
-        ("C", 2, row[COL["C2"]]),
-        ("C", 3, row[COL["C3"]]),
-    ]
-    
-    for checkpoint, reading_num, value in mapping:
-        if value is None or str(value).strip() == "":
-            continue
-        cur.execute("""
-            INSERT INTO public.latest_calibration_measurements (gage_serial, checkpoint, reading_number, value)
-            VALUES (%s, %s, %s, %s)
-        """, (serial_num, checkpoint, reading_num, float(value)))
+--- 🚀 Starting Local Calibration Pipeline Sync ---
+Reading target sheet: calibration_template_v2.xlsx
+Parsed 2 data rows from Excel.
+Connecting to local PostgreSQL instance ('CalTest')...
+[FATAL CONNECTION ERROR]: Could not link to Postgres port. Verify your password in .env.
+Detail: connection to server at "localhost" (127.0.0.1), port 5432 failed: Connection refused (0x0000274D/10061)
+        Is the server running on that host and accepting TCP/IP connections?
+connection to server at "localhost" (::1), port 5432 failed: Connection refused (0x0000274D/10061)
+        Is the server running on that host and accepting TCP/IP connections?
